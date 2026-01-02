@@ -1,0 +1,63 @@
+TABLE: alembic_version
+----------------------
+  version_num               character varying    NULLABLE: NO
+ 
+TABLE: games
+------------
+  game_id                   character varying    NULLABLE: NO
+  timestamp                 timestamp without time zone NULLABLE: YES
+  name                      character varying    NULLABLE: YES
+  release_date              timestamp without time zone NULLABLE: YES
+  is_free                   boolean              NULLABLE: YES
+  price                     integer              NULLABLE: YES
+  developer                 character varying    NULLABLE: YES
+  publisher                 character varying    NULLABLE: YES
+  positive_reviews          integer              NULLABLE: YES
+  negative_reviews          integer              NULLABLE: YES
+  genres                    text                 NULLABLE: YES
+  reviews_processed         boolean              NULLABLE: YES
+  reviews_all_langs_processed boolean              NULLABLE: YES
+  reviews_processed_at      timestamp without time zone NULLABLE: YES
+ 
+TABLE: ownerships
+-----------------
+  ownership_id              character varying    NULLABLE: NO
+  timestamp                 timestamp without time zone NULLABLE: YES
+  game_id                   character varying    NULLABLE: YES
+  user_id                   character varying    NULLABLE: YES
+  playtime_forever          integer              NULLABLE: YES
+  last_played               timestamp without time zone NULLABLE: YES
+ 
+TABLE: reviews
+--------------
+  review_id                 character varying    NULLABLE: NO
+  timestamp                 timestamp without time zone NULLABLE: YES
+  user_id                   character varying    NULLABLE: YES
+  game_id                   character varying    NULLABLE: YES
+  language                  character varying    NULLABLE: YES
+  text                      text                 NULLABLE: YES
+  time_created              timestamp without time zone NULLABLE: YES
+  time_updated              timestamp without time zone NULLABLE: YES
+  is_positive               boolean              NULLABLE: YES
+  votes_up                  integer              NULLABLE: YES
+  votes_funny               integer              NULLABLE: YES
+  weighted_vote_score       double precision     NULLABLE: YES
+  comment_count             integer              NULLABLE: YES
+  steam_purchase            boolean              NULLABLE: YES
+  received_for_free         boolean              NULLABLE: YES
+  written_during_early_access boolean              NULLABLE: YES
+  playtime_at_review        integer              NULLABLE: YES
+  playtime_forever          integer              NULLABLE: YES
+  playtime_last_two_weeks   integer              NULLABLE: YES
+  last_played               timestamp without time zone NULLABLE: YES
+ 
+TABLE: users
+------------
+  user_id                   character varying    NULLABLE: NO
+  timestamp                 timestamp without time zone NULLABLE: YES
+  personal_name             character varying    NULLABLE: YES
+  real_name                 character varying    NULLABLE: YES
+  profile_url               character varying    NULLABLE: YES
+  time_created              timestamp without time zone NULLABLE: YES
+  country_code              character varying    NULLABLE: YES
+  ownerships_processed      boolean              NULLABLE: YES
