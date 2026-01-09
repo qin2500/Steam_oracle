@@ -12,12 +12,11 @@ def main():
     if len(sys.argv) < 2:
         print("Usage: python main.py <query>")
         print('Example: python main.py "Soulslike for casuals"')
-        # Default query for testing
-        query = "I want a chill sci-fi game with base building that isn't too expensive"
+        # query = "I want a chill sci-fi game with base building that isn't too expensive"
     else:
         query = sys.argv[1]
         
-    print(f"\n🚀 Agentic Search: '{query}'")
+    print(f"\nAgentic Search: '{query}'")
     print("--------------------------------------------------")
     
     app = get_graph()
@@ -31,35 +30,42 @@ def main():
     }
     
     # Run the graph
-    # We use .invoke for simple execution
     try:
         result = app.invoke(initial_state)
         
-        # Display Results
+        # Process results for output
+        final_output = {
+            "query": result['query'],
+            "interpretation": result['interpreted_needs'].model_dump(),
+            "results": []
+        }
         
-        # 1. Interpretation
-        criteria = result['interpreted_needs']
-        print(f"\n🧠 Interpretation:")
-        print(f"   • Mechanics: {', '.join(criteria.primary_mechanics)}")
-        print(f"   • Atmosphere: {', '.join(criteria.atmosphere)}")
-        print(f"   • Avoid: {', '.join(criteria.deal_breakers)}")
-        print(f"   • Search Terms: '{criteria.search_terms}'")
-        
-        # 2. Results
-        graded = result['final_results']
-        print(f"\n🏆 Top Matches ({len(graded)} found):")
-        
-        for i, game in enumerate(graded[:3], 1): # Show top 3
-            print(f"\n   {i}. {game['name']} (Score: {game['match_score']})")
-            print(f"      Matched: {', '.join(game['matched_criteria'])}")
-            if game['missing_criteria']:
-                print(f"      Missing: {', '.join(game['missing_criteria'])}")
-            print(f"      Reasoning: {game['reasoning']}")
+        for game in result['final_results']:
+            # Filter out deal_breakers from assessments for the user view
+            filtered_assessments = [
+                asm for asm in game['criteria_assessments'] 
+                if asm.category != 'deal_breaker'
+            ]
+            
+            game_data = {
+                "id": game['game_id'],
+                "name": game['name'],
+                "score": game['match_score'],
+                "reasoning": game['reasoning'],
+                "assessments": [asm.model_dump() for asm in filtered_assessments],
+                "summary": game['summary']
+            }
+            final_output["results"].append(game_data)
+            
+        # Output ONLY raw JSON
+        print(json.dumps(final_output, indent=2))
             
     except Exception as e:
-        print(f"\n❌ Error: {e}")
-        import traceback
-        traceback.print_exc()
+        # Output error as JSON too so frontend can handle it
+        error_response = {"error": str(e)}
+        print(json.dumps(error_response))
+        # import traceback
+        # traceback.print_exc()
 
 if __name__ == "__main__":
     main()

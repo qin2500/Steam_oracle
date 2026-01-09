@@ -36,14 +36,40 @@ You must be objective. Use the game summary as the source of truth.
 Criteria to Check:
 - Primary Mechanics: {primary_mechanics}
 - Atmosphere: {atmosphere}
-- Deal Breakers (If present, score should be 0): {deal_breakers}
+- Deal Breakers: {deal_breakers}
+
+Instructions for Grading:
+1. Positive Matching: Check if the game has the Primary Mechanics and Atmosphere.
+   - List found items in 'matched_criteria'.
+   - List items NOT found in 'missing_criteria'.
+2. Negative Constraints (Deal Breakers):
+   - You must verify that the game DOES NOT contain these features.
+   - If a deal breaker IS present, the score must be 0.
+   - If a deal breaker is NOT present, that is GOOD. Do NOT list it in 'missing_criteria'.
+   - Do not list deal breakers in 'matched_criteria' either. Mention them in reasoning if relevant.
+3. Scoring:
+   - Start at 100. Deduct points for missing Mechanics/Atmosphere.
+   - If a Deal Breaker is found, Score = 0.
 
 Output:
 Strictly valid JSON with:
 - match_score (0-100)
-- matched_criteria (list of strings)
-- missing_criteria (list of strings)
-- reasoning (short explanation)
+- reasoning (short overall summary)
+- criteria_assessments: List of objects, one for EACH item in the provided lists above.
+    Structure:
+    {{
+       "criterion": "The exact string from input",
+       "category": "mechanic" | "atmosphere" | "deal_breaker",
+       "status": "met" | "partial" | "missing" | "violated"
+    }}
+
+IMPORTANT: Do not output any conversational text header or footer (e.g. "Here is the JSON"). Output ONLY the raw JSON string.
+
+Status Definitions:
+- met (Green): Clearly present.
+- partial (Yellow): Somewhat present or ambiguous.
+- missing (Red): Clearly absent (for Mechanics/Atmosphere) OR present (for Deal Breakers).
+- violated (Red - Fatal): A Deal Breaker was found.
 """
 
 grader_prompt = ChatPromptTemplate.from_messages([

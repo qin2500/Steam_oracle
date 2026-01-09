@@ -11,5 +11,6 @@ def get_llm(model_name: str = None, temperature: float = 0):
         model=model,
         api_key=settings.OPENROUTER_API_KEY,
         base_url=settings.OPENROUTER_BASE_URL,
-        temperature=temperature
+        temperature=temperature,
+        max_tokens=2048 # Ensure enough space for structured JSON
     )

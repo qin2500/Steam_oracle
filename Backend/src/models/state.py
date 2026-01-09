@@ -33,14 +33,28 @@ class GameCandidate(TypedDict):
     similarity_score: float
     metadata: Dict[str, Any]
 
+class CriterionAssessment(BaseModel):
+    criterion: str = Field(..., description="The specific requirement being checked")
+    category: str = Field(..., description="'mechanic', 'atmosphere', or 'deal_breaker'")
+    status: str = Field(..., description="'met' (green), 'partial' (yellow), 'missing' (red), or 'violated' (fatal)")
+    confidence: Optional[int] = Field(default=0, description="0-100 confidence level")
+    evidence: Optional[str] = Field(default="", description="Quote or reasoning from the summary")
+
+class GradingOutput(BaseModel):
+    """
+    The strict output schema for the Grader LLM.
+    """
+    match_score: int = Field(..., description="Score 0-100")
+    criteria_assessments: List[CriterionAssessment] = Field(..., description="Assessment of each criterion")
+    reasoning: str = Field(..., description="Short summary of the grading decision")
+
 class GradedResult(GameCandidate):
     """
     A game candidate that has been graded/scored by the agent.
     """
     match_score: int # 0-100
-    matched_criteria: List[str]
-    missing_criteria: List[str]
-    reasoning: str
+    criteria_assessments: List[CriterionAssessment]
+    reasoning: str # Overall summary reasoning
 
 class AgentState(TypedDict):
     """

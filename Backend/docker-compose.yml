@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  backend:
+    build: .
+    container_name: steam_oracle_backend
+    ports:
+      - "8000:8000"
+    environment:
+      # Optional: Override settings if needed
+      - DEFAULT_MODEL=anthropic/claude-3.5-sonnet
+    volumes:
+      # efficient development: mount source code so you don't have to rebuild on change
+      - ./src:/app/src
+    env_file:
+      - .env
+    restart: unless-stopped
