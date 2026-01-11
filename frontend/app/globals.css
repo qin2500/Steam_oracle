@@ -1,0 +1,66 @@
+@import "tailwindcss";
+
+:root {
+  /* Steam Palette */
+  --steam-darkest: #171a21;
+  --steam-dark: #1b2838;
+  --steam-blue: #2a475e;
+  --steam-light-blue: #66c0f4;
+  --steam-text: #c7d5e0;
+  --steam-highlight: #c1e9f4;
+  --steam-accent: #1999ff;
+  /* Brighter accent for buttons/focus */
+
+  --background: var(--steam-darkest);
+  --foreground: var(--steam-text);
+}
+
+@theme inline {
+  --color-steam-darkest: var(--steam-darkest);
+  --color-steam-dark: var(--steam-dark);
+  --color-steam-blue: var(--steam-blue);
+  --color-steam-light: var(--steam-light-blue);
+  --color-steam-text: var(--steam-text);
+  --color-steam-highlight: var(--steam-highlight);
+  --color-steam-accent: var(--steam-accent);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  @apply selection:bg-steam-light/30 selection:text-white;
+}
+
+@layer utilities {
+  .steam-card {
+    @apply bg-steam-dark border border-white/5 shadow-xl transition-all duration-300;
+  }
+
+  .steam-input {
+    @apply bg-black/20 border border-[#2a475e] rounded-[2px] text-white placeholder-steam-text/50 focus:border-steam-light focus:ring-1 focus:ring-steam-light/50 transition-all outline-none;
+  }
+
+  .steam-button {
+    @apply bg-gradient-to-r from-[#47bfff] to-[#1a44c2] text-white font-medium rounded-[2px] hover:brightness-125 transition-all disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .animate-in {
+    animation: fadeIn 0.5s ease-out forwards;
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  @keyframes fadeIn {
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}
