@@ -4,6 +4,7 @@ from langchain_core.output_parsers import JsonOutputParser
 from ..models.state import AgentState, GameCriteria, GradedResult, GameCandidate, GradingOutput
 from ..services.llm import get_llm
 from ..services.vector_store import get_vector_store
+from ..services.sql_tool import get_filtered_game_ids
 from .prompts import interpreter_prompt, grader_prompt
 
 # ------------------------------------------------------------------------------
@@ -36,7 +37,32 @@ def retrieve(state: AgentState) -> Dict[str, Any]:
     vector_store = get_vector_store()
     
     # Returns List[Tuple[Document, float]]
-    results = vector_store.similarity_search_with_score(search_query, k=25)
+    
+    # FILTERING: Check if we need to apply SQL filters
+    filtered_ids = get_filtered_game_ids(criteria)
+    
+    # Construct filter args for PGVector if ids are returned
+    # PGVector uses a specific syntax for metadata/id filtering depending on the adapter
+    # For langchain-postgres PGVector, it usually accepts a 'filter' dict.
+    # But filtering by ID is often special.
+    # Note: PGVector's similarity_search accepts a `filter` argument which is passed to the store.
+    # For Postgres, it is usually a JSON match on metadata.
+    # However, since we want to filter by the primary ID (which might be in metadata or DB primary key),
+    # The safest way given standard usage is to filter WHERE metadata->>'game_id' IN (...)
+    
+    search_kwargs = {"k": 25}
+    if filtered_ids is not None:
+        if len(filtered_ids) == 0:
+            # Filters matched nothing! Return empty result immediately
+            return {"candidates": []}
+            
+        print(f"Applying SQL filter: restricted to {len(filtered_ids)} games")
+        # Construct metadata filter
+        # Syntax depends on the underlying driver but normally it's:
+        # filter = {"game_id": {"$in": ["id1", "id2"]}}
+        search_kwargs["filter"] = {"game_id": {"$in": filtered_ids}}
+    
+    results = vector_store.similarity_search_with_score(search_query, **search_kwargs)
     
     candidates: List[GameCandidate] = []
     

@@ -22,6 +22,14 @@ class GameCriteria(BaseModel):
         ...,
         description="A highly optimized natural language string to use for the vector similarity search."
     )
+    
+    # New filters for Hybrid Search
+    min_reviews: Optional[int] = Field(None, description="Minimum number of total reviews (for popularity)")
+    min_rating: Optional[float] = Field(None, description="Minimum rating from 0.0 to 1.0 (positive/total)")
+    price_max: Optional[int] = Field(None, description="Maximum price in cents")
+    is_free: Optional[bool] = Field(None, description="If true, only show free games")
+    release_year: Optional[int] = Field(None, description="Specific release year to filter by")
+    genres: Optional[List[str]] = Field(None, description="List of genres to strictly filter by")
 
 class GameCandidate(TypedDict):
     """
