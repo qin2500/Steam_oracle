@@ -73,7 +73,7 @@ def get_filtered_game_ids(criteria: GameCriteria) -> Optional[List[str]]:
     # Execute
     conn = None
     try:
-        conn = psycopg2.connect(settings.DB_URI)
+        conn = psycopg.connect(settings.DB_URI)
         cur = conn.cursor()
         cur.execute(full_query, tuple(params))
         rows = cur.fetchall()

@@ -1,6 +1,13 @@
 import os
 import json
 import psycopg2
+import concurrent.futures
+import argparse
+import time
+import warnings
+import logging
+import sys
+from contextlib import contextmanager
 from typing import List, Dict, Optional
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain.messages import HumanMessage, SystemMessage
@@ -10,10 +17,26 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Suppress warnings and logs
+warnings.filterwarnings("ignore")
+logging.getLogger('sqlalchemy.engine').setLevel(logging.ERROR)
+
 # Database connection
-DB_URI = "postgresql://vec_search:sPvDZbcMAR5yH8pyG76Xa7uq@138.197.137.22:5234/steam_db"
+DB_URI = os.getenv("DB_URI")
+if not DB_URI:
+    raise ValueError("DB_URI environment variable not set")
+
 # PGVector requires psycopg format (with + sign)
-PGVECTOR_CONNECTION = "postgresql+psycopg://vec_search:sPvDZbcMAR5yH8pyG76Xa7uq@138.197.137.22:5234/steam_db"
+# Append options to silence warnings
+if DB_URI.startswith("postgresql://"):
+    PGVECTOR_CONNECTION = DB_URI.replace("postgresql://", "postgresql+psycopg://", 1)
+else:
+    PGVECTOR_CONNECTION = DB_URI
+
+if "?" not in PGVECTOR_CONNECTION:
+    PGVECTOR_CONNECTION += "?options=-c%20client_min_messages=ERROR"
+else:
+    PGVECTOR_CONNECTION += "&options=-c%20client_min_messages=ERROR"
 
 # OpenRouter configuration
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
@@ -23,33 +46,61 @@ if not OPENROUTER_API_KEY:
 # OpenRouter base URL
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
-# Initialize embeddings model (will be reused)
+# Initialize embeddings model (stateless/thread-safe enough for our usage)
 embeddings = OpenAIEmbeddings(
     model="text-embedding-3-small",
     api_key=OPENROUTER_API_KEY,
     base_url=OPENROUTER_BASE_URL
 )
 
+@contextmanager
+def suppress_stderr():
+    """Context manager to suppress stderr (including C-level output) using os.dup2."""
+    try:
+        # Open devnull
+        with open(os.devnull, 'w') as fnull:
+            # Save original stderr fd
+            try:
+                old_stderr_fd = os.dup(sys.stderr.fileno())
+            except Exception:
+                # If we can't dup (e.g. no console), just yield
+                yield
+                return
+
+            try:
+                # Redirect stderr to devnull
+                os.dup2(fnull.fileno(), sys.stderr.fileno())
+                yield
+            finally:
+                # Restore stderr
+                os.dup2(old_stderr_fd, sys.stderr.fileno())
+                os.close(old_stderr_fd)
+    except Exception:
+         # Fallback if anything goes wrong with file descriptors
+         yield
+
+
+def get_db_connection():
+    """Create a database connection."""
+    # Pass options to silence server-side warnings (best effort)
+    conn = psycopg2.connect(DB_URI, options="-c client_min_messages=ERROR")
+    return conn
+
 
 def setup_database():
     """Enable pgvector extension. PGVector will handle table creation."""
     print("Setting up database...")
-    conn = psycopg2.connect(DB_URI)
-    cur = conn.cursor()
-
     try:
+        conn = get_db_connection()
+        cur = conn.cursor()
         # Enable pgvector extension
         cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-        print(" pgvector extension enabled")
         conn.commit()
-        print("Database setup complete!\n")
-    except Exception as e:
-        conn.rollback()
-        print(f"Error setting up database: {e}")
-        raise
-    finally:
         cur.close()
         conn.close()
+    except Exception as e:
+        print(f"Error setting up database: {e}")
+        raise
 
 
 def get_vector_store():
@@ -61,7 +112,7 @@ def get_vector_store():
         embeddings=embeddings,
         collection_name="game_summaries",
         connection=PGVECTOR_CONNECTION,
-        use_jsonb=True
+        use_jsonb=True,
     )
 
 
@@ -76,10 +127,11 @@ def get_top_games(limit: int = 1000) -> List[Dict]:
         List of game dictionaries with game_id, name, and review counts
     """
     print(f"Fetching top {limit} games...")
-    conn = psycopg2.connect(DB_URI)
-    cur = conn.cursor()
-
+    
     try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
         cur.execute("""
             SELECT game_id, name, positive_reviews, negative_reviews
             FROM games
@@ -97,12 +149,15 @@ def get_top_games(limit: int = 1000) -> List[Dict]:
                 'negative_reviews': row[3],
                 'total_reviews': row[2] + row[3]
             })
+        
+        cur.close()
+        conn.close()
 
         print(f" Found {len(games)} games\n")
         return games
-    finally:
-        cur.close()
-        conn.close()
+    except Exception as e:
+        print(f"Error fetching top games: {e}")
+        raise
 
 
 def get_reviews_for_game(game_id: str) -> Dict[str, List[str]]:
@@ -113,7 +168,7 @@ def get_reviews_for_game(game_id: str) -> Dict[str, List[str]]:
     - 10 random positive reviews
     - 10 random negative reviews
     """
-    conn = psycopg2.connect(DB_URI)
+    conn = get_db_connection()
     cur = conn.cursor()
 
     reviews = {
@@ -260,41 +315,39 @@ Return ONLY a JSON object in this exact format:
         result = json.loads(response_text)
         return result
     except Exception as e:
-        print(f"Error generating summary: {e}")
+        print(f"Error generating summary for {game_name}: {e}")
         return None
 
 
-
-
-def process_game(game: Dict, index: int, total: int, vector_store: PGVector) -> bool:
+def process_game(game: Dict) -> bool:
     """
     Process a single game: get reviews, generate summary, create embedding, store results.
-    Uses LangChain's PGVector to automatically handle embedding and storage.
+    Each worker initializes its own vector store to ensure DB connection safety.
     Returns True if successful, False otherwise.
     """
-    game_id = game['game_id']
-    game_name = game['name']
-
-    print(f"[{index}/{total}] Processing: {game_name} ({game_id})")
-
     try:
+        # Initialize thread-local vector store
+        vector_store = get_vector_store()
+        
+        game_id = game['game_id']
+        game_name = game['name']
+        
+        # print(f"Processing: {game_name} ({game_id})")
+
         # Get reviews
         reviews = get_reviews_for_game(game_id)
         review_count = (len(reviews['top_positive']) + len(reviews['top_negative']) +
                        len(reviews['random_positive']) + len(reviews['random_negative']))
 
         if review_count == 0:
-            print(f" No reviews found, skipping")
+            print(f"Skipping {game_name} - No reviews")
             return False
-
-        print(f"  → Found {review_count} reviews")
 
         # Generate summary using Claude
         summary_data = generate_summary_with_langchain(game_name, reviews)
         if not summary_data:
+            print(f"Failed to generate summary for {game_name}")
             return False
-
-        print(f"  → Generated summary")
 
         # Create a Document object with the summary and metadata
         doc = Document(
@@ -309,11 +362,11 @@ def process_game(game: Dict, index: int, total: int, vector_store: PGVector) -> 
         )
 
         # Delete existing document if it exists (upsert behavior)
+        # Note: In a highly concurrent environment with duplicate game IDs this could be racy,
+        # but since we iterate distinct games from the DB, it should be fine.
         try:
             vector_store.delete(ids=[game_id])
-            print(f"  → Deleted existing entry")
         except Exception:
-            # No existing entry to delete, which is fine
             pass
 
         # Add to vector store
@@ -322,87 +375,116 @@ def process_game(game: Dict, index: int, total: int, vector_store: PGVector) -> 
             ids=[game_id]
         )
 
-        print(f"  ✓ Stored with embedding")
-
+        print(f"SUCCESS: {game_name}")
         return True
+
     except Exception as e:
-        print(f"Error processing game: {e}")
+        print(f"ERROR processing {game.get('name', 'Unknown')}: {e}")
         return False
 
 
 def main():
     """
     Main execution function.
-
-    Args:
-        limit: Number of top games to process (default: 1000)
     """
-    print("=" * 60)
-    print("Steam Game Review Embedding Pipeline")
-    print("=" * 60)
-    print()
+    try:
+        parser = argparse.ArgumentParser(description='Steam Game Review Embedding Pipeline')
+        parser.add_argument('--limit', type=int, default=1000, help='Number of top games to process')
+        parser.add_argument('--workers', type=int, default=5, help='Number of parallel workers')
+        args = parser.parse_args()
 
-    setup_database()
-
-    # Initialize vector store
-    print("Initializing PGVector store...")
-    vector_store = get_vector_store()
-    print("✓ Vector store initialized\n")
-
-    # Get top N games
-    games = get_top_games(100)
-
-    # Process each game
-    print(f"Processing {len(games)} games...")
-    print("-" * 60)
-
-    success_count = 0
-    failure_count = 0
-
-    for i, game in enumerate(games, 1):
-        if process_game(game, i, len(games), vector_store):
-            success_count += 1
-        else:
-            failure_count += 1
+        print("=" * 60)
+        print("Steam Game Review Embedding Pipeline (Parallel)")
+        print("=" * 60)
+        print(f"Limit: {args.limit}")
+        print(f"Workers: {args.workers}")
         print()
 
-    # Print summary
-    print("=" * 60)
-    print("Processing Complete!")
-    print("=" * 60)
-    print(f"✓ Successful: {success_count}")
-    print(f"✗ Failed: {failure_count}")
-    print(f"Total: {len(games)}")
-    print()
+        # Suppress stderr for setup and validation as well
+        with suppress_stderr():
+            setup_database()
+            # Get top N games
+            games = get_top_games(args.limit)
 
-    # Validation
-    print("Validating results...")
-    conn = psycopg2.connect(DB_URI)
-    cur = conn.cursor()
+        # Process games in parallel
+        print(f"Processing {len(games)} games with {args.workers} workers...")
+        print("-" * 60)
 
-    # PGVector creates a table named: langchain_pg_collection and langchain_pg_embedding
-    cur.execute("""
-        SELECT COUNT(*)
-        FROM langchain_pg_embedding lpe
-        JOIN langchain_pg_collection lpc ON lpe.collection_id = lpc.uuid
-        WHERE lpc.name = 'game_summaries';
-    """)
-    total_rows = cur.fetchone()[0]
+        success_count = 0
+        failure_count = 0
+        
+        start_time = time.time()
 
-    cur.execute("""
-        SELECT COUNT(*)
-        FROM langchain_pg_embedding lpe
-        JOIN langchain_pg_collection lpc ON lpe.collection_id = lpc.uuid
-        WHERE lpc.name = 'game_summaries'
-        AND lpe.embedding IS NOT NULL;
-    """)
-    with_embeddings = cur.fetchone()[0]
+        # Suppress stderr GLOBAL for parallel execution to avoid C-level thread output leaking
+        with suppress_stderr():
+            with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as executor:
+                # Submit all tasks
+                future_to_game = {executor.submit(process_game, game): game for game in games}
+                
+                # Process results as they complete
+                for i, future in enumerate(concurrent.futures.as_completed(future_to_game), 1):
+                    game = future_to_game[future]
+                    try:
+                        result = future.result()
+                        if result:
+                            success_count += 1
+                        else:
+                            failure_count += 1
+                    except Exception as exc:
+                        # This prints to stdout, so it's visible even with stderr suppressed
+                        print(f'{game["name"]} generated an exception: {exc}')
+                        failure_count += 1
+                    
+                    # We can print to stdout
+                    if i % 1 == 0:
+                        print(f"Progress: {i}/{len(games)} | Success: {success_count} | Fail: {failure_count}")
 
-    print(f"✓ Total documents in collection: {total_rows}")
-    print(f"✓ Documents with embeddings: {with_embeddings}")
+        duration = time.time() - start_time
+        
+        # Print summary
+        print("=" * 60)
+        print("Processing Complete!")
+        print("=" * 60)
+        print(f"Time taken: {duration:.2f} seconds")
+        print(f"✓ Successful: {success_count}")
+        print(f"✗ Failed: {failure_count}")
+        print(f"Total: {len(games)}")
+        print()
 
-    cur.close()
-    conn.close()
+        # Validation
+        print("Validating results...")
+        
+        with suppress_stderr():
+            conn = get_db_connection()
+            cur = conn.cursor()
+
+            cur.execute("""
+                SELECT COUNT(*)
+                FROM langchain_pg_embedding lpe
+                JOIN langchain_pg_collection lpc ON lpe.collection_id = lpc.uuid
+                WHERE lpc.name = 'game_summaries';
+            """)
+            total_rows = cur.fetchone()[0]
+
+            cur.execute("""
+                SELECT COUNT(*)
+                FROM langchain_pg_embedding lpe
+                JOIN langchain_pg_collection lpc ON lpe.collection_id = lpc.uuid
+                WHERE lpc.name = 'game_summaries'
+                AND lpe.embedding IS NOT NULL;
+            """)
+            with_embeddings = cur.fetchone()[0]
+
+            cur.close()
+            conn.close()
+
+        print(f"✓ Total documents in collection: {total_rows}")
+        print(f"✓ Documents with embeddings: {with_embeddings}")
+
+    except KeyboardInterrupt:
+        print("\nOperation cancelled by user.")
+    except Exception as e:
+        print(f"Fatal error: {e}")
 
 
 if __name__ == "__main__":

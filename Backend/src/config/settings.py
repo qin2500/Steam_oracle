@@ -13,10 +13,7 @@ class Settings(BaseSettings):
     DEFAULT_MODEL: str = "anthropic/claude-3.5-sonnet"
     
     # Database
-    DB_URI: str = Field(
-        default="postgresql://vec_search:sPvDZbcMAR5yH8pyG76Xa7uq@138.197.137.22:5234/steam_db",
-        description="PostgreSQL Connection URI"
-    )
+    DB_URI: str = Field(..., description="PostgreSQL Connection URI")
     
     # Helper to get the async/sync connection string if needed for specific libs
     @property

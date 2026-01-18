@@ -18,6 +18,14 @@ Strictly valid JSON with the following keys:
 - atmosphere: list of strings
 - deal_breakers: list of strings
 - search_terms: string (Required)
+- min_reviews: int (Optional, for popularity/fame)
+- min_rating: float (Optional 0.0-1.0, e.g. "highly rated" -> 0.8)
+- price_max: int (Optional, in cents. e.g. "$10" -> 1000)
+- is_free: bool (Optional)
+- release_year: int (Optional)
+- genres: list of strings (Optional)
+
+IMPORTANT: Return ONLY raw JSON. Do not include markdown formatting (```json ... ```) and do not output any conversational text like "Here is the JSON". Just the raw JSON object.
 """
 
 interpreter_prompt = ChatPromptTemplate.from_messages([
