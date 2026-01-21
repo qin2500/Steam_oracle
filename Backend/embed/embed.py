@@ -15,7 +15,11 @@ from langchain_postgres import PGVector
 from langchain_core.documents import Document
 from dotenv import load_dotenv
 
-load_dotenv()
+# explicitly load .env from parent directory of this script
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+env_path = os.path.join(parent_dir, '.env')
+load_dotenv(env_path)
 
 # Suppress warnings and logs
 warnings.filterwarnings("ignore")
@@ -116,29 +120,51 @@ def get_vector_store():
     )
 
 
-def get_top_games(limit: int = 1000) -> List[Dict]:
+def get_top_games(limit: Optional[int] = None, skip_existing: bool = False) -> List[Dict]:
     """
     Query the top N games by total review count.
+    If limit is None, fetch all games.
 
     Args:
-        limit: Number of games to fetch (default: 1000)
+        limit: Number of games to fetch (default: None for all)
+        skip_existing: If True, exclude games that already have an embedding.
 
     Returns:
         List of game dictionaries with game_id, name, and review counts
     """
-    print(f"Fetching top {limit} games...")
+    limit_str = f"{limit}" if limit else "ALL"
+    print(f"Fetching top games (Limit: {limit_str}, Skip Existing: {skip_existing})...")
     
     try:
         conn = get_db_connection()
         cur = conn.cursor()
         
-        cur.execute("""
+        # Base query
+        query = """
             SELECT game_id, name, positive_reviews, negative_reviews
             FROM games
             WHERE reviews_processed = true
-            ORDER BY (positive_reviews + negative_reviews) DESC
-            LIMIT %s;
-        """, (limit,))
+        """
+        
+        # Add exclusion filter if requested
+        if skip_existing:
+            query += """
+                AND game_id NOT IN (
+                    SELECT lpe.cmetadata->>'game_id'
+                    FROM langchain_pg_embedding lpe
+                    JOIN langchain_pg_collection lpc ON lpe.collection_id = lpc.uuid
+                    WHERE lpc.name = 'game_summaries'
+                )
+            """
+            
+        query += " ORDER BY (positive_reviews + negative_reviews) DESC"
+        
+        params = ()
+        if limit:
+            query += " LIMIT %s"
+            params = (limit,)
+            
+        cur.execute(query, params)
 
         games = []
         for row in cur.fetchall():
@@ -153,7 +179,7 @@ def get_top_games(limit: int = 1000) -> List[Dict]:
         cur.close()
         conn.close()
 
-        print(f" Found {len(games)} games\n")
+        print(f" Found {len(games)} games to process\n")
         return games
     except Exception as e:
         print(f"Error fetching top games: {e}")
@@ -301,7 +327,10 @@ Return ONLY a JSON object in this exact format:
             HumanMessage(content=user_prompt)
         ]
 
-        response = llm.invoke(messages)
+        # Suppress stderr here just in case LangChain logs something
+        with suppress_stderr():
+            response = llm.invoke(messages)
+            
         response_text = response.content.strip()
 
         # Parse JSON response
@@ -389,22 +418,24 @@ def main():
     """
     try:
         parser = argparse.ArgumentParser(description='Steam Game Review Embedding Pipeline')
-        parser.add_argument('--limit', type=int, default=1000, help='Number of top games to process')
+        parser.add_argument('--limit', type=int, default=None, help='Number of top games to process (default: All)')
         parser.add_argument('--workers', type=int, default=5, help='Number of parallel workers')
+        parser.add_argument('--skip-existing', action='store_true', help='Skip games that already have an embedding')
         args = parser.parse_args()
 
         print("=" * 60)
         print("Steam Game Review Embedding Pipeline (Parallel)")
         print("=" * 60)
-        print(f"Limit: {args.limit}")
+        print(f"Limit: {args.limit if args.limit else 'ALL'}")
         print(f"Workers: {args.workers}")
+        print(f"Skip Existing: {args.skip_existing}")
         print()
 
         # Suppress stderr for setup and validation as well
         with suppress_stderr():
             setup_database()
             # Get top N games
-            games = get_top_games(args.limit)
+            games = get_top_games(args.limit, args.skip_existing)
 
         # Process games in parallel
         print(f"Processing {len(games)} games with {args.workers} workers...")
