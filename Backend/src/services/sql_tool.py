@@ -60,12 +60,21 @@ def get_filtered_game_ids(criteria: GameCriteria) -> Optional[List[str]]:
     # The genres column is type 'text', likely comma-separated or JSON string.
     # Looking at schema.txt it says 'text'. Assuming comma separated or simple string for now.
     # We will use ILIKE for basic matching.
-    if criteria.genres:
-        for genre in criteria.genres:
-            query_parts.append("AND genres ILIKE %s")
-            params.append(f"%{genre}%")
+    # CRITICAL CHANGE: Disabling strict SQL genre filtering. 
+    # It leads to 0 results if the user query implies multiple genres (e.g. Horror + Puzzle) 
+    # and no single game lacks those specific tags. 
+    # We will rely on Semantic Vector Search to handle genre matching.
+    # if criteria.genres:
+        # for genre in criteria.genres:
+            # query_parts.append("AND genres ILIKE %s")
+            # params.append(f"%{genre}%")
             
     # Limit to prevent returning 100k IDs if the filter is too loose
+    # CRITICAL FIX: Ensure we select the same "top" games that were likely embedded.
+    # Otherwise, we might select 10,000 obscure games that satisfy the condition
+    # but aren't in the vector store, resulting in 0 matches.
+    query_parts.append("AND reviews_processed = true")
+    query_parts.append("ORDER BY (positive_reviews + negative_reviews) DESC")
     query_parts.append("LIMIT 10000")
     
     full_query = "\n".join(query_parts)

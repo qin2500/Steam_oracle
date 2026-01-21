@@ -45,19 +45,24 @@ export async function searchGames(
                 if (!line.trim()) continue;
 
                 try {
+                    // console.log('Parsing line:', line);
                     const event: StreamEvent = JSON.parse(line);
+                    console.log('Received Event:', event.type);
 
                     switch (event.type) {
                         case 'optimization':
+                            console.log('Setting interpretation:', event.data);
                             onUpdate({
                                 interpretation: event.data,
                                 status: 'searching'
                             });
                             break;
                         case 'progress':
+                            console.log('Progress:', event.message);
                             // Optional: could add a specific message field to state
                             break;
                         case 'result':
+                            console.log('Got Results:', event.data?.length);
                             onUpdate({
                                 results: event.data,
                                 status: 'completed'
@@ -73,6 +78,21 @@ export async function searchGames(
                 } catch (e) {
                     console.warn('Failed to parse stream line:', line, e);
                 }
+            }
+        }
+
+        // Process any remaining buffer content
+        if (buffer.trim()) {
+            try {
+                const event: StreamEvent = JSON.parse(buffer);
+                if (event.type === 'result') {
+                    onUpdate({
+                        results: event.data,
+                        status: 'completed'
+                    });
+                }
+            } catch (e) {
+                console.warn('Failed to parse (remaining) stream line:', buffer, e);
             }
         }
     } catch (error) {
