@@ -5,6 +5,16 @@ Steam Oracle is a web application that provides insights and analysis on Steam g
 > [!NOTE]
 > This project was developed in collaboration with **Blue Ocean Games**.
 
+## Live Demo
+
+Check out the live demo at [https://steam-oracle.anthonyqin.me](https://steam-oracle.anthonyqin.me).
+
+> [!WARNING]
+> **Limitations:**
+> 1. The demo instance is not guaranteed to be online 24/7.
+> 2. The database is limited to a pool of 500 games.
+> 3. All thumbnails currently display *Clair Obscur: Expedition 33* as a placeholder (thumbnail data was not fully collected).
+
 ## Project Structure
 
 -   **Backend**: Python/FastAPI application with PostgreSQL and Vector Search.
